@@ -1,0 +1,20 @@
+# Runtime state and rendered artifacts
+/runtime/state.env
+/runtime/instance/
+/publish_*
+
+# Local IDE/editor files
+/.idea/
+/.vscode/
+/.codex
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Shell / test leftovers
+*.bak
+*.tmp

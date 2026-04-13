@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Bash syntax check
+        run: |
+          bash -n bin/hsctl headscale-install.sh lib/*.sh tests/*.sh
+
+      - name: Shellcheck
+        run: |
+          shellcheck -x bin/hsctl headscale-install.sh lib/*.sh tests/*.sh
+
+      - name: Local validation
+        run: |
+          bash tests/validate-local.sh

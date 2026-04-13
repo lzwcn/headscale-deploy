@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${BIN_DIR}/.." && pwd)"
+LIB_DIR="${PROJECT_ROOT}/lib"
+TEMPLATE_DIR="${PROJECT_ROOT}/templates"
+RUNTIME_DIR="${PROJECT_ROOT}/runtime"
+STATE_FILE_DEFAULT="${RUNTIME_DIR}/state.env"
+LEGACY_MARKER_DEFAULT="/etc/headscale-install.path"
+
+# shellcheck source=../lib/common.sh
+. "${LIB_DIR}/common.sh"
+# shellcheck source=../lib/state.sh
+. "${LIB_DIR}/state.sh"
+# shellcheck source=../lib/validate.sh
+. "${LIB_DIR}/validate.sh"
+# shellcheck source=../lib/render.sh
+. "${LIB_DIR}/render.sh"
+# shellcheck source=../lib/install.sh
+. "${LIB_DIR}/install.sh"
+# shellcheck source=../lib/manage.sh
+. "${LIB_DIR}/manage.sh"
+# shellcheck source=../lib/upgrade.sh
+. "${LIB_DIR}/upgrade.sh"
+# shellcheck source=../lib/repair.sh
+. "${LIB_DIR}/repair.sh"
+# shellcheck source=../lib/legacy.sh
+. "${LIB_DIR}/legacy.sh"
+
+show_help() {
+  cat <<'EOF'
+Headscale deployment helper
+
+Usage:
+  hsctl install [--auto] [--config FILE] [install flags]
+  hsctl render [--auto] [--config FILE] [install flags]
+  hsctl up | down | status | logs
+  hsctl user add NAME | delete NAME | list
+  hsctl node list [--user NAME] | register --user NAME --key NODEKEY | delete ID
+  hsctl key create --user NAME | list
+  hsctl apikey create [--expiration DURATION] | list | expire --prefix PREFIX
+  hsctl upgrade [--image-tag TAG] [--no-backup]
+  hsctl repair db
+  hsctl uninstall [-y]
+  hsctl paths
+  hsctl legacy [old flat flags]
+
+Install flags:
+  --config FILE
+  --prefix DIR
+  --serverurl URL
+  --port PORT
+  --listenaddr IPv4
+  --username NAME
+  --basedomain DOMAIN
+  --image-tag TAG
+  --docker-network NAME|none
+  --container-name NAME
+  --derp-mode disabled|private|public
+  --derp-ipv4 IP
+  --derp-ipv6 IP
+  --derp-stun-addr ADDR
+  -y, --yes
+EOF
+}
+
+show_paths() {
+  load_persisted_state
+  apply_hs_paths
+  cat <<EOF
+PROJECT_ROOT=${PROJECT_ROOT}
+TEMPLATE_DIR=${TEMPLATE_DIR}
+RUNTIME_DIR=${RUNTIME_DIR}
+STATE_FILE=${STATE_FILE}
+LEGACY_MARKER=${LEGACY_MARKER}
+HS_ROOT=${HS_ROOT}
+HS_CONF=${HS_CONF}
+HS_COMPOSE=${HS_COMPOSE}
+HS_DATA_DIR=${HS_DATA_DIR}
+EOF
+}
+
+dispatch() {
+  local cmd="${1:-help}"
+
+  case "${cmd}" in
+    help|-h|--help)
+      show_help
+      ;;
+    install)
+      shift
+      run_install_command "$@"
+      ;;
+    render)
+      shift
+      run_render_command "$@"
+      ;;
+    up)
+      shift
+      run_up_command "$@"
+      ;;
+    down)
+      shift
+      run_down_command "$@"
+      ;;
+    status)
+      shift
+      run_status_command "$@"
+      ;;
+    logs)
+      shift
+      run_logs_command "$@"
+      ;;
+    user)
+      shift
+      run_user_command "$@"
+      ;;
+    node)
+      shift
+      run_node_command "$@"
+      ;;
+    key)
+      shift
+      run_key_command "$@"
+      ;;
+    apikey)
+      shift
+      run_apikey_command "$@"
+      ;;
+    upgrade|update)
+      shift
+      run_upgrade_command "$@"
+      ;;
+    repair)
+      shift
+      run_repair_command "$@"
+      ;;
+    uninstall)
+      shift
+      run_uninstall_command "$@"
+      ;;
+    paths)
+      shift
+      show_paths "$@"
+      ;;
+    legacy)
+      shift
+      legacy_main "$@"
+      ;;
+    --*)
+      legacy_main "$@"
+      ;;
+    *)
+      exiterr "Unknown command: ${cmd}"
+      ;;
+  esac
+}
+
+bootstrap_runtime_defaults
+dispatch "$@"
