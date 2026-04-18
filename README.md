@@ -41,6 +41,7 @@ headscale-deploy/
 │  └─ legacy.sh
 ├─ templates/
 │  ├─ config.yaml.tpl
+│  ├─ compose.host.yaml.tpl
 │  ├─ compose.network.yaml.tpl
 │  ├─ compose.portmap.yaml.tpl
 │  └─ install.env.example
@@ -84,9 +85,10 @@ At minimum, review:
 - `HS_ROOT`
 - `SERVER_URL`
 - `DOCKER_MODE`
-- `HS_DOCKER_NETWORK`
+- `HS_DOCKER_NETWORK` (only when `DOCKER_MODE=network`)
 - `HEADSCALE_TAG`
 - `DERP_MODE`
+- `DNS_GLOBAL_NAMESERVERS` (optional)
 
 `runtime/install.env` uses simple `KEY=value` syntax with optional single or double quotes. Values are parsed as data only, not executed as shell code. If a value contains spaces, wrap it in quotes.
 
@@ -151,6 +153,8 @@ bash bin/hsctl apikey expire --prefix PREFIX
 bash bin/hsctl upgrade [--image-tag TAG] [--no-backup]
 bash bin/hsctl repair db
 bash bin/hsctl uninstall [-y]
+bash bin/hsctl paths
+bash bin/hsctl legacy [old flat flags]
 ```
 
 ## Install Modes
@@ -171,6 +175,9 @@ bash bin/hsctl install --auto --config runtime/install.env
 
 Good for repeatable deployments and automation.
 
+Useful install flags include `--listenaddr`, `--docker-mode`, `--docker-network`, `--container-name`, and `--derp-stun-addr`.
+Use `bash bin/hsctl paths` to inspect the current managed paths.
+
 ## Docker Modes
 
 ### `DOCKER_MODE=network`
@@ -184,6 +191,11 @@ Behavior:
 - the reverse proxy should route HTTPS traffic to the `headscale` container
 - if embedded DERP is enabled, the compose file also publishes `3478/udp`
 
+Notes:
+
+- `3478/udp` still traverses Docker networking in this mode
+- if you need reliable embedded DERP IPv6/STUN behavior, `DOCKER_MODE=network` is not the first choice
+
 ### `DOCKER_MODE=portmap`
 
 Use this when you want to expose Headscale directly from the host.
@@ -192,6 +204,45 @@ Behavior:
 
 - publishes `${PORT}:8080`
 - if embedded DERP is enabled, also publishes `${DERP_STUN_PORT}/udp`
+
+Notes:
+
+- `3478/udp` still goes through Docker port publishing
+- if clients need embedded DERP IPv6, prefer `DOCKER_MODE=host`
+
+### `DOCKER_MODE=host`
+
+Use this when you need stable embedded DERP IPv6/STUN behavior.
+
+Behavior:
+
+- compose does not use `ports`
+- compose does not join an external Docker network
+- the container uses the host network stack directly
+- Headscale binds directly on host `LISTEN_ADDR:8080`
+- embedded DERP `3478/udp` no longer depends on Docker port publishing
+
+Listen address semantics:
+
+- `LISTEN_ADDR=0.0.0.0` keeps an IPv4 listener
+- `LISTEN_ADDR=::` renders to `[::]:8080` and is the dual-stack friendly host listener form
+- `DERP_STUN_LISTEN_ADDR=:3478` remains the recommended default
+- `DERP_STUN_LISTEN_ADDR=[::]:3478` is the explicit IPv6 wildcard form when you want to spell that out
+
+Recommended when:
+
+- embedded DERP is enabled and you want `tailscale netcheck` to reliably report `IPv6: yes`
+- `443/TCP` is healthy but the embedded DERP IPv6/STUN path is still failing
+
+## Embedded DERP IPv6 Notes
+
+Keep these points in mind:
+
+- healthy `443/TCP` does not prove STUN is healthy
+- `tailscale netcheck` is the fastest client-side signal
+- prefer `DOCKER_MODE=host` when embedded DERP must support IPv6
+- use `DERP_STUN_LISTEN_ADDR=:3478` by default
+- explicitly set both `DERP_IPV4` and `DERP_IPV6` whenever possible
 
 ## DERP Modes
 
@@ -261,12 +312,14 @@ In other words:
 If your server is in mainland China, a practical starting point is:
 
 ```bash
-DOCKER_MODE=network
+DOCKER_MODE=host
 SERVER_URL="https://<your-headscale-domain>"
 DERP_MODE=private
 DERP_IPV4=your.public.ip
-DERP_STUN_LISTEN_ADDR=0.0.0.0:3478
+DERP_IPV6=your.public.ipv6
+DERP_STUN_LISTEN_ADDR=:3478
 DERP_INCLUDE_DEFAULTS=true
+DNS_GLOBAL_NAMESERVERS=223.5.5.5,223.6.6.6,119.29.29.29,2400:3200::1,2400:3200:baba::1,1.1.1.1,2606:4700:4700::1111
 ```
 
 And make sure:
@@ -274,7 +327,7 @@ And make sure:
 - your domain resolves correctly
 - HTTPS reverse proxy is working
 - `3478/udp` is open in the firewall/security group
-- your reverse proxy forwards HTTPS traffic to Headscale
+- your reverse proxy forwards HTTPS traffic to host `127.0.0.1:8080` or the chosen host listen address
 
 Why this is the safer choice:
 
@@ -287,11 +340,39 @@ Why this is the safer choice:
 ```bash
 bash bin/hsctl install --auto \
   --config runtime/install.env \
+  --docker-mode host \
   --serverurl "https://<your-headscale-domain>" \
-  --docker-network headscale \
   --derp-mode private \
-  --derp-ipv4 203.0.113.10
+  --derp-ipv4 203.0.113.10 \
+  --derp-ipv6 2001:db8::10
 ```
+
+## Recommended Post-install Checks
+
+On the server, run at least:
+
+```bash
+bash bin/hsctl status
+docker compose -f runtime/instance/compose.yaml logs --tail=100 headscale
+ss -lunp | grep 3478
+```
+
+From a client, run:
+
+```bash
+tailscale netcheck
+```
+
+If embedded DERP is enabled and you want to inspect IPv6 STUN directly, capture:
+
+```bash
+tcpdump -ni any udp port 3478
+```
+
+How to read the result:
+
+- if `tailscale netcheck` shows `IPv6: yes`, the DERP/STUN IPv6 path is healthy
+- if it shows `IPv6: no, but OS has support`, check Docker networking, `DERP_IPV6`, `DERP_STUN_LISTEN_ADDR`, and `3478/udp` before blaming HTTPS
 
 ## Legacy Compatibility
 
@@ -303,6 +384,7 @@ bash headscale-install.sh --upgrade --image-tag 0.28.0
 ```
 
 Internally it is now a compatibility wrapper around `bin/hsctl`.
+For new installs and automation, prefer `bash bin/hsctl ...`; keep `headscale-install.sh` and `hsctl legacy` only for compatibility with older call patterns.
 
 ## Notes
 
@@ -316,7 +398,6 @@ Internally it is now a compatibility wrapper around `bin/hsctl`.
 ## Extra Docs
 
 - [Chinese client onboarding guide](docs/CLIENT_ONBOARDING.zh-CN.md)
-- [GitHub publishing guide (Chinese)](docs/GITHUB_PUBLISHING.zh-CN.md)
 
 ## Roadmap
 

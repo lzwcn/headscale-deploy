@@ -113,127 +113,28 @@ legacy_main() {
   bootstrap_runtime_defaults
   load_persisted_state
 
-  local install_args=()
-  local saw_install_flag=0
+  local passthrough_args=()
+  local upgrade_args=()
   local action=""
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --auto)
         AUTO=1
-        saw_install_flag=1
-        install_args+=("$1")
+        passthrough_args+=("$1")
         shift
         ;;
-      --config)
+      --config|--prefix|--serverurl|--port|--listenaddr|--username|--basedomain|--image-tag|--docker-mode|--docker-network|--container-name|--derp-mode|--derp-ipv4|--derp-ipv6|--derp-stun-addr)
         [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        load_env_file "$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --prefix)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        HS_ROOT="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --serverurl)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        SERVER_URL="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --port)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        PORT="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --listenaddr)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        LISTEN_ADDR="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --username)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        FIRST_USERNAME="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --basedomain)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        BASE_DOMAIN="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --image-tag)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        HEADSCALE_TAG="$2"
-        IMAGE_TAG_EXPLICIT=1
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --docker-network)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        if [ "$2" = "none" ] || [ "$2" = "-" ]; then
-          DOCKER_MODE="portmap"
-          HS_DOCKER_NETWORK=""
-        else
-          DOCKER_MODE="network"
-          HS_DOCKER_NETWORK="$2"
+        passthrough_args+=("$1" "$2")
+        if [ "${action}" = "upgrade" ] && [ "$1" = "--image-tag" ]; then
+          upgrade_args+=("$1" "$2")
         fi
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --container-name)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        HS_CONTAINER="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --derp-mode)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        DERP_MODE="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --derp-ipv4)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        DERP_IPV4="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --derp-ipv6)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        DERP_IPV6="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
-        shift 2
-        ;;
-      --derp-stun-addr)
-        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
-        DERP_STUN_LISTEN_ADDR="$2"
-        saw_install_flag=1
-        install_args+=("$1" "$2")
         shift 2
         ;;
       -y|--yes)
         ASSUME_YES=1
-        saw_install_flag=1
-        install_args+=("$1")
+        passthrough_args+=("$1")
         shift
         ;;
       --adduser)
@@ -309,7 +210,11 @@ legacy_main() {
         shift
         ;;
       --no-backup)
-        NO_BACKUP=1
+        if [ "${action}" = "upgrade" ]; then
+          upgrade_args+=("$1")
+        else
+          passthrough_args+=("$1")
+        fi
         shift
         ;;
       --fix-db|--fix-db-schema)
@@ -326,7 +231,7 @@ legacy_main() {
     esac
   done
 
-  if [ -z "${action}" ] && [ "${#install_args[@]}" -eq 0 ]; then
+  if [ -z "${action}" ] && [ "${#passthrough_args[@]}" -eq 0 ]; then
     if has_install_files; then
       legacy_interactive_menu
     else
@@ -337,7 +242,7 @@ legacy_main() {
 
   case "${action}" in
     "")
-      run_install_command "${install_args[@]}"
+      run_install_command "${passthrough_args[@]}"
       ;;
     user-add)
       sanitize_username "${TARGET_USERNAME}"
@@ -395,15 +300,7 @@ legacy_main() {
       fi
       ;;
     upgrade)
-      if [ "${IMAGE_TAG_EXPLICIT}" -eq 1 ] && [ "${NO_BACKUP}" -eq 1 ]; then
-        run_upgrade_command --image-tag "${HEADSCALE_TAG}" --no-backup
-      elif [ "${IMAGE_TAG_EXPLICIT}" -eq 1 ]; then
-        run_upgrade_command --image-tag "${HEADSCALE_TAG}"
-      elif [ "${NO_BACKUP}" -eq 1 ]; then
-        run_upgrade_command --no-backup
-      else
-        run_upgrade_command
-      fi
+      run_upgrade_command "${upgrade_args[@]}"
       ;;
     repair-db)
       if [ "${ASSUME_YES}" -eq 1 ]; then

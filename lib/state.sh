@@ -17,18 +17,19 @@ bootstrap_runtime_defaults() {
   LISTEN_ADDR="${LISTEN_ADDR:-0.0.0.0}"
   FIRST_USERNAME="${FIRST_USERNAME:-admin}"
   BASE_DOMAIN="${BASE_DOMAIN:-headscale.internal}"
-  DOCKER_MODE="${DOCKER_MODE:-network}"
+  DOCKER_MODE="${DOCKER_MODE:-host}"
   HS_DOCKER_NETWORK="${HS_DOCKER_NETWORK:-headscale}"
   DERP_MODE="${DERP_MODE:-disabled}"
   DERP_REGION_ID="${DERP_REGION_ID:-999}"
   DERP_REGION_CODE="${DERP_REGION_CODE:-headscale}"
   DERP_REGION_NAME="${DERP_REGION_NAME:-Headscale Embedded DERP}"
-  DERP_STUN_LISTEN_ADDR="${DERP_STUN_LISTEN_ADDR:-0.0.0.0:3478}"
+  DERP_STUN_LISTEN_ADDR="${DERP_STUN_LISTEN_ADDR:-:3478}"
   DERP_STUN_PORT="${DERP_STUN_PORT:-3478}"
   DERP_IPV4="${DERP_IPV4:-}"
   DERP_IPV6="${DERP_IPV6:-}"
   DERP_INCLUDE_DEFAULTS="${DERP_INCLUDE_DEFAULTS:-true}"
   DERP_AUTO_ADD_EMBEDDED_REGION="${DERP_AUTO_ADD_EMBEDDED_REGION:-true}"
+  DNS_GLOBAL_NAMESERVERS="${DNS_GLOBAL_NAMESERVERS:-1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001}"
 
   AUTO=0
   ASSUME_YES=0
@@ -67,13 +68,20 @@ apply_hs_paths() {
 }
 
 normalize_network_mode() {
-  if [ "${DOCKER_MODE}" = "portmap" ] || [ "${DOCKER_MODE}" = "none" ]; then
-    DOCKER_MODE="portmap"
-    HS_DOCKER_NETWORK=""
-  else
-    DOCKER_MODE="network"
-    HS_DOCKER_NETWORK="${HS_DOCKER_NETWORK:-headscale}"
-  fi
+  case "${DOCKER_MODE}" in
+    portmap|none)
+      DOCKER_MODE="portmap"
+      HS_DOCKER_NETWORK=""
+      ;;
+    host)
+      DOCKER_MODE="host"
+      HS_DOCKER_NETWORK=""
+      ;;
+    *)
+      DOCKER_MODE="network"
+      HS_DOCKER_NETWORK="${HS_DOCKER_NETWORK:-headscale}"
+      ;;
+  esac
 }
 
 normalize_derp_mode() {
@@ -84,7 +92,8 @@ normalize_derp_mode() {
       ;;
   esac
 
-  DERP_STUN_PORT="${DERP_STUN_LISTEN_ADDR##*:}"
+  DERP_STUN_PORT="$(extract_socket_port "${DERP_STUN_LISTEN_ADDR}")" ||
+    exiterr "Invalid DERP_STUN_LISTEN_ADDR: ${DERP_STUN_LISTEN_ADDR}"
 }
 
 load_persisted_state() {
@@ -128,6 +137,7 @@ write_state_file() {
     printf 'DERP_IPV6=%s\n' "$(env_quote_value "${DERP_IPV6}")"
     printf 'DERP_INCLUDE_DEFAULTS=%s\n' "$(env_quote_value "${DERP_INCLUDE_DEFAULTS}")"
     printf 'DERP_AUTO_ADD_EMBEDDED_REGION=%s\n' "$(env_quote_value "${DERP_AUTO_ADD_EMBEDDED_REGION}")"
+    printf 'DNS_GLOBAL_NAMESERVERS=%s\n' "$(env_quote_value "${DNS_GLOBAL_NAMESERVERS}")"
   } >"${STATE_FILE}"
   safe_chmod 640 "${STATE_FILE}"
 }

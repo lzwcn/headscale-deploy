@@ -26,8 +26,19 @@ jobs:
 
       - name: Shellcheck
         run: |
-          shellcheck -x bin/hsctl headscale-install.sh lib/*.sh tests/*.sh
+          shellcheck -x --source-path=SCRIPTDIR bin/hsctl headscale-install.sh tests/*.sh
 
       - name: Local validation
         run: |
           bash tests/validate-local.sh
+
+  docker-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker validation
+        run: |
+          sudo -E bash tests/validate-docker.sh

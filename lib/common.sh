@@ -16,6 +16,10 @@ log_detail() {
   log_raw "    $*"
 }
 
+warnmsg() {
+  log_raw "WARN: $*"
+}
+
 log_cmd() {
   log_raw "+ $*"
 }
@@ -63,7 +67,67 @@ check_port() {
     [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
 }
 
+normalize_ip_literal() {
+  local addr="$1"
+
+  if [[ "${addr}" =~ ^\[(.*)\]$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  printf '%s' "${addr}"
+}
+
+check_ip_or_ipv6() {
+  local addr
+  addr="$(normalize_ip_literal "$1")"
+  check_ip "${addr}" || check_ipv6 "${addr}"
+}
+
+format_host_port() {
+  local host="$1"
+  local port="$2"
+  local normalized_host
+
+  normalized_host="$(normalize_ip_literal "${host}")"
+  if check_ipv6 "${normalized_host}"; then
+    printf '[%s]:%s' "${normalized_host}" "${port}"
+  else
+    printf '%s:%s' "${normalized_host}" "${port}"
+  fi
+}
+
+extract_socket_port() {
+  local addr="$1"
+  local host=""
+  local port=""
+
+  case "${addr}" in
+    :*)
+      port="${addr#:}"
+      ;;
+    \[*\]:*)
+      host="${addr%%]:*}"
+      host="${host#[}"
+      port="${addr##*:}"
+      check_ipv6 "${host}" || return 1
+      ;;
+    *:*)
+      host="${addr%:*}"
+      port="${addr##*:}"
+      check_ip "${host}" || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  check_port "${port}" || return 1
+  printf '%s' "${port}"
+}
+
 sanitize_username() {
+  # shellcheck disable=SC2034
   SANITIZED_USERNAME="${1//[^0-9a-zA-Z_-]/_}"
 }
 
@@ -82,13 +146,16 @@ decode_env_double_quoted() {
 
   while [ "${i}" -lt "${#input}" ]; do
     ch="${input:${i}:1}"
-    if [ "${ch}" = '\' ] && [ $((i + 1)) -lt "${#input}" ]; then
+    if [ "${ch}" = "\\" ] && [ $((i + 1)) -lt "${#input}" ]; then
       next="${input:$((i + 1)):1}"
       case "${next}" in
         n) output+=$'\n' ;;
         r) output+=$'\r' ;;
         t) output+=$'\t' ;;
-        '"'|'\'|'$'|'`') output+="${next}" ;;
+        '"') output+='"' ;;
+        "\\") output+="\\" ;;
+        '$') output+='$' ;;
+        '`') output+='`' ;;
         *) output+="\\${next}" ;;
       esac
       i=$((i + 2))
@@ -148,13 +215,15 @@ load_env_file() {
     if [ -z "${raw}" ]; then
       value=""
     elif [[ "${raw}" == \"*\" ]]; then
-      [ "${#raw}" -ge 2 ] && [ "${raw: -1}" = '"' ] ||
+      if [ "${#raw}" -lt 2 ] || [ "${raw: -1}" != '"' ]; then
         exiterr "Unterminated double-quoted value in ${file}:${line_no}"
+      fi
       inner="${raw:1:${#raw}-2}"
       value="$(decode_env_double_quoted "${inner}")"
     elif [[ "${raw}" == \'*\' ]]; then
-      [ "${#raw}" -ge 2 ] && [ "${raw: -1}" = "'" ] ||
+      if [ "${#raw}" -lt 2 ] || [ "${raw: -1}" != "'" ]; then
         exiterr "Unterminated single-quoted value in ${file}:${line_no}"
+      fi
       value="${raw:1:${#raw}-2}"
     else
       case "${raw}" in
@@ -165,8 +234,7 @@ load_env_file() {
       value="${raw}"
     fi
 
-    printf -v "${key}" '%s' "${value}"
-    export "${key}"
+    declare -gx "${key}=${value}"
   done <"${file}"
 }
 

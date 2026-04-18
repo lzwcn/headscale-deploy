@@ -8,39 +8,67 @@ parse_common_install_flags() {
         shift
         ;;
       --config)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         load_env_file "$2"
         shift 2
         ;;
       --prefix)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         HS_ROOT="$2"
         shift 2
         ;;
       --serverurl)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         SERVER_URL="$2"
         shift 2
         ;;
       --port)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         PORT="$2"
         shift 2
         ;;
       --listenaddr)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         LISTEN_ADDR="$2"
         shift 2
         ;;
       --username)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         FIRST_USERNAME="$2"
         shift 2
         ;;
       --basedomain)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         BASE_DOMAIN="$2"
         shift 2
         ;;
       --image-tag)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         HEADSCALE_TAG="$2"
-        IMAGE_TAG_EXPLICIT=1
+        shift 2
+        ;;
+      --docker-mode)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
+        case "$2" in
+          network)
+            DOCKER_MODE="network"
+            ;;
+          portmap|none)
+            DOCKER_MODE="portmap"
+            HS_DOCKER_NETWORK=""
+            ;;
+          host)
+            DOCKER_MODE="host"
+            HS_DOCKER_NETWORK=""
+            ;;
+          *)
+            exiterr "Invalid docker mode: $2"
+            ;;
+        esac
         shift 2
         ;;
       --docker-network)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         if [ "$2" = "none" ] || [ "$2" = "-" ]; then
           DOCKER_MODE="portmap"
           HS_DOCKER_NETWORK=""
@@ -51,22 +79,27 @@ parse_common_install_flags() {
         shift 2
         ;;
       --container-name)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         HS_CONTAINER="$2"
         shift 2
         ;;
       --derp-mode)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         DERP_MODE="$2"
         shift 2
         ;;
       --derp-ipv4)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         DERP_IPV4="$2"
         shift 2
         ;;
       --derp-ipv6)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         DERP_IPV6="$2"
         shift 2
         ;;
       --derp-stun-addr)
+        [ "$#" -ge 2 ] || exiterr "Missing value for $1"
         DERP_STUN_LISTEN_ADDR="$2"
         shift 2
         ;;
@@ -85,6 +118,10 @@ parse_common_install_flags() {
   done
 }
 
+install_bind_addr() {
+  format_host_port "${LISTEN_ADDR}" 8080
+}
+
 prompt_with_default() {
   local prompt="$1"
   local current="$2"
@@ -99,6 +136,16 @@ prompt_with_default() {
   fi
 }
 
+require_interactive_server_url_for_derp() {
+  if [ -z "${SERVER_URL}" ]; then
+    exiterr "Embedded DERP requires an explicit HTTPS SERVER_URL. Please enter https://<your-headscale-domain> during interactive install."
+  fi
+
+  if ! printf '%s' "${SERVER_URL}" | grep -q '^https://'; then
+    exiterr "Embedded DERP requires SERVER_URL to start with https:// during interactive install."
+  fi
+}
+
 collect_interactive_install_settings() {
   echo
   log_step "Interactive install"
@@ -107,33 +154,33 @@ collect_interactive_install_settings() {
   apply_hs_paths
 
   local mode_default mode_input
-  if [ "${DOCKER_MODE}" = "network" ]; then
-    mode_default="network"
-  else
-    mode_default="portmap"
-  fi
-  mode_input="$(prompt_with_default 'Docker mode (network/portmap)' "${mode_default}")"
+  mode_default="${DOCKER_MODE}"
+  mode_input="$(prompt_with_default 'Docker mode (network/portmap/host)' "${mode_default}")"
   case "${mode_input}" in
     network) DOCKER_MODE="network" ;;
     portmap|none) DOCKER_MODE="portmap" ;;
+    host) DOCKER_MODE="host" ;;
     *) exiterr "Invalid Docker mode: ${mode_input}" ;;
   esac
 
   if [ "${DOCKER_MODE}" = "network" ]; then
     SERVER_URL="$(prompt_with_default 'Server URL (required, format: https://<your-headscale-domain>)' "${SERVER_URL}")"
     HS_DOCKER_NETWORK="$(prompt_with_default 'External Docker network' "${HS_DOCKER_NETWORK}")"
+  elif [ "${DOCKER_MODE}" = "host" ]; then
+    SERVER_URL="$(prompt_with_default 'Server URL (blank = auto-detect http://IP:8080; required for DERP/HTTPS setups)' "${SERVER_URL}")"
   else
     SERVER_URL="$(prompt_with_default 'Server URL (blank = auto-detect http://IP:PORT)' "${SERVER_URL}")"
     PORT="$(prompt_with_default 'Host TCP port' "${PORT}")"
   fi
 
-  LISTEN_ADDR="$(prompt_with_default 'Listen address' "${LISTEN_ADDR}")"
+  LISTEN_ADDR="$(prompt_with_default 'Listen address (IPv4 or IPv6 literal; :: means dual-stack if supported)' "${LISTEN_ADDR}")"
   FIRST_USERNAME="$(prompt_with_default 'Initial user name' "${FIRST_USERNAME}")"
   BASE_DOMAIN="$(prompt_with_default 'MagicDNS base domain' "${BASE_DOMAIN}")"
   HEADSCALE_TAG="$(prompt_with_default 'Image tag' "${HEADSCALE_TAG}")"
   HS_CONTAINER="$(prompt_with_default 'Container name' "${HS_CONTAINER}")"
   DERP_MODE="$(prompt_with_default 'DERP mode (disabled/private/public)' "${DERP_MODE}")"
   if [ "${DERP_MODE}" != "disabled" ]; then
+    require_interactive_server_url_for_derp
     DERP_IPV4="$(prompt_with_default 'DERP public IPv4 (optional but recommended)' "${DERP_IPV4}")"
     DERP_IPV6="$(prompt_with_default 'DERP public IPv6 (optional)' "${DERP_IPV6}")"
     DERP_STUN_LISTEN_ADDR="$(prompt_with_default 'DERP STUN listen addr' "${DERP_STUN_LISTEN_ADDR}")"
@@ -154,7 +201,11 @@ compute_server_url() {
 
   detect_ip
   check_nat_ip
-  COMPUTED_SERVER_URL="http://${PUBLIC_IP_ADDR:-${IP_ADDR}}:${PORT}"
+  if [ "${DOCKER_MODE}" = "host" ]; then
+    COMPUTED_SERVER_URL="http://${PUBLIC_IP_ADDR:-${IP_ADDR}}:8080"
+  else
+    COMPUTED_SERVER_URL="http://${PUBLIC_IP_ADDR:-${IP_ADDR}}:${PORT}"
+  fi
 }
 
 show_install_summary() {
@@ -163,11 +214,13 @@ show_install_summary() {
   log_detail "Image=${HEADSCALE_IMAGE}:${HEADSCALE_TAG}"
   log_detail "Container=${HS_CONTAINER}"
   log_detail "server_url=${COMPUTED_SERVER_URL}"
-  log_detail "listen_addr=${LISTEN_ADDR}:8080"
+  log_detail "listen_addr=$(install_bind_addr)"
   log_detail "user=${FIRST_USERNAME} base_domain=${BASE_DOMAIN}"
   log_detail "derp_mode=${DERP_MODE}"
   if [ "${DOCKER_MODE}" = "network" ]; then
     log_detail "docker_mode=network external_network=${HS_DOCKER_NETWORK}"
+  elif [ "${DOCKER_MODE}" = "host" ]; then
+    log_detail "docker_mode=host bind=$(install_bind_addr)"
   else
     log_detail "docker_mode=portmap publish=${PORT}:8080"
   fi
@@ -225,15 +278,30 @@ finish_setup() {
   log_detail "server_url: ${COMPUTED_SERVER_URL}"
   if [ "${DOCKER_MODE}" = "network" ]; then
     log_detail "Docker network: ${HS_DOCKER_NETWORK}"
+  elif [ "${DOCKER_MODE}" = "host" ]; then
+    log_detail "Host bind: $(install_bind_addr)"
   else
     log_detail "Published: host TCP ${PORT} -> container 8080"
   fi
   echo
   echo "Client:"
   echo "  tailscale up --login-server ${COMPUTED_SERVER_URL} --authkey <key>"
+  if [ "${DERP_MODE}" != "disabled" ]; then
+    echo "  tailscale netcheck"
+  fi
   echo
   echo "CLI on host:"
   echo "  docker compose -f ${HS_COMPOSE} exec ${HS_CONTAINER} headscale users list"
+  echo
+  echo "Recommended checks on the server:"
+  echo "  bash bin/hsctl status"
+  if [ "${DERP_MODE}" != "disabled" ]; then
+    echo "  docker compose -f ${HS_COMPOSE} logs --tail=100 ${HS_CONTAINER}"
+    echo "  ss -lunp | grep ${DERP_STUN_PORT}"
+    if [ -n "${DERP_IPV6}" ]; then
+      echo "  tcpdump -ni any udp port ${DERP_STUN_PORT}"
+    fi
+  fi
 }
 
 run_install_pipeline() {

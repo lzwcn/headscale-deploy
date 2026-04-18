@@ -88,7 +88,8 @@ run_down_command() {
 
 run_status_command() {
   assert_installed
-  local verify_clients_line stun_line exec_status
+  local exec_status listen_line region_code_line region_name_line
+  local verify_clients_line stun_line derp_ipv4_line derp_ipv6_line
 
   echo "Headscale deployment status"
   echo "---------------------------"
@@ -100,16 +101,28 @@ run_status_command() {
   echo "docker_mode: ${DOCKER_MODE}"
   if [ "${DOCKER_MODE}" = "network" ]; then
     echo "docker_network: ${HS_DOCKER_NETWORK}"
+  elif [ "${DOCKER_MODE}" = "host" ]; then
+    echo "host_network: true"
   else
     echo "published_port: ${PORT}"
   fi
   echo "derp_mode: ${DERP_MODE}"
 
   if [ -f "${HS_CONF}" ]; then
+    listen_line="$(grep -m1 '^listen_addr:' "${HS_CONF}" | sed 's/^[[:space:]]*//')"
+    region_code_line="$(grep -m1 '^[[:space:]]*region_code:' "${HS_CONF}" | sed 's/^[[:space:]]*//')"
+    region_name_line="$(grep -m1 '^[[:space:]]*region_name:' "${HS_CONF}" | sed 's/^[[:space:]]*//')"
     verify_clients_line="$(grep -m1 '^[[:space:]]*verify_clients:' "${HS_CONF}" | sed 's/^[[:space:]]*//')"
     stun_line="$(grep -m1 '^[[:space:]]*stun_listen_addr:' "${HS_CONF}" | sed 's/^[[:space:]]*//')"
+    derp_ipv4_line="$(grep -m1 '^[[:space:]]*ipv4:' "${HS_CONF}" | sed 's/^[[:space:]]*//')"
+    derp_ipv6_line="$(grep -m1 '^[[:space:]]*ipv6:' "${HS_CONF}" | sed 's/^[[:space:]]*//')"
+    [ -n "${listen_line}" ] && echo "${listen_line}"
+    [ -n "${region_code_line}" ] && echo "${region_code_line}"
+    [ -n "${region_name_line}" ] && echo "${region_name_line}"
     [ -n "${verify_clients_line}" ] && echo "${verify_clients_line}"
     [ -n "${stun_line}" ] && echo "${stun_line}"
+    [ -n "${derp_ipv4_line}" ] && echo "${derp_ipv4_line}"
+    [ -n "${derp_ipv6_line}" ] && echo "${derp_ipv6_line}"
   fi
 
   if docker_compose exec -T "${HS_CONTAINER}" headscale version >/dev/null 2>&1; then

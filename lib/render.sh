@@ -25,8 +25,28 @@ create_directories() {
   safe_chmod 750 "${HS_CONF_DIR}" "${HS_DATA_DIR}"
 }
 
+render_yaml_list_block() {
+  local indent="$1"
+  local raw="$2"
+  local item block=""
+  local IFS=','
+  local items=()
+
+  read -r -a items <<< "${raw}"
+
+  for item in "${items[@]}"; do
+    item="$(trim_whitespace "${item}")"
+    [ -n "${item}" ] || continue
+    block+="${indent}- ${item}"$'\n'
+  done
+
+  [ -n "${block}" ] || exiterr "Refusing to render an empty YAML list block."
+  printf '%s' "${block%$'\n'}"
+}
+
 render_config_template() {
   local derp_enabled derp_verify_clients derp_urls_block derp_ipv4 derp_ipv6
+  local dns_nameservers_block listen_addr_with_port
 
   case "${DERP_MODE}" in
     disabled)
@@ -51,12 +71,14 @@ render_config_template() {
 
   derp_ipv4="${DERP_IPV4:-\"\"}"
   derp_ipv6="${DERP_IPV6:-\"\"}"
+  dns_nameservers_block="$(render_yaml_list_block '      ' "${DNS_GLOBAL_NAMESERVERS}")"
+  listen_addr_with_port="$(format_host_port "${LISTEN_ADDR}" 8080)"
 
   log_step "Rendering ${HS_CONF}"
   render_template_file \
     "${TEMPLATE_DIR}/config.yaml.tpl" "${HS_CONF}" \
     SERVER_URL "${COMPUTED_SERVER_URL}" \
-    LISTEN_ADDR "${LISTEN_ADDR}" \
+    LISTEN_ADDR_WITH_PORT "${listen_addr_with_port}" \
     BASE_DOMAIN "${BASE_DOMAIN}" \
     OFFICIAL_GIT "${OFFICIAL_GIT}" \
     DERP_ENABLED "${derp_enabled}" \
@@ -68,7 +90,8 @@ render_config_template() {
     DERP_IPV4 "${derp_ipv4}" \
     DERP_IPV6 "${derp_ipv6}" \
     DERP_URLS_BLOCK "${derp_urls_block}" \
-    DERP_AUTO_ADD_EMBEDDED_REGION "${DERP_AUTO_ADD_EMBEDDED_REGION}"
+    DERP_AUTO_ADD_EMBEDDED_REGION "${DERP_AUTO_ADD_EMBEDDED_REGION}" \
+    DNS_GLOBAL_NAMESERVERS_BLOCK "${dns_nameservers_block}"
   safe_chmod 640 "${HS_CONF}"
 }
 
@@ -80,7 +103,16 @@ render_compose_template() {
   fi
 
   log_step "Rendering ${HS_COMPOSE}"
-  if [ "${DOCKER_MODE}" = "network" ]; then
+  if [ "${DOCKER_MODE}" = "host" ]; then
+    render_template_file \
+      "${TEMPLATE_DIR}/compose.host.yaml.tpl" "${HS_COMPOSE}" \
+      HEADSCALE_IMAGE "${HEADSCALE_IMAGE}" \
+      HEADSCALE_TAG "${HEADSCALE_TAG}" \
+      HS_CONTAINER "${HS_CONTAINER}" \
+      HS_CONF_DIR "${HS_CONF_DIR}" \
+      HS_DATA_DIR "${HS_DATA_DIR}" \
+      OFFICIAL_GIT "${OFFICIAL_GIT}"
+  elif [ "${DOCKER_MODE}" = "network" ]; then
     render_template_file \
       "${TEMPLATE_DIR}/compose.network.yaml.tpl" "${HS_COMPOSE}" \
       HEADSCALE_IMAGE "${HEADSCALE_IMAGE}" \

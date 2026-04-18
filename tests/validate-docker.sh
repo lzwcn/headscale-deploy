@@ -16,7 +16,6 @@ TEST_HOST="127.0.0.1"
 PORT_CANDIDATES=(38080 39080 40080 41080 42080 43080)
 PORT=""
 AS_ROOT=0
-INSTALL_DONE=0
 INSTALL_ATTEMPTED=0
 CURRENT_STAGE="initializing"
 TIMEOUT_BIN=""
@@ -174,17 +173,18 @@ PORT=${PORT}
 LISTEN_ADDR=0.0.0.0
 FIRST_USERNAME=admin
 BASE_DOMAIN=headscale.internal
-DOCKER_MODE=portmap
+DOCKER_MODE=host
 HS_DOCKER_NETWORK=
 DERP_MODE=disabled
 DERP_REGION_ID=999
 DERP_REGION_CODE=headscale
 DERP_REGION_NAME="Headscale Embedded DERP"
-DERP_STUN_LISTEN_ADDR=0.0.0.0:3478
+DERP_STUN_LISTEN_ADDR=:3478
 DERP_IPV4=
 DERP_IPV6=
 DERP_INCLUDE_DEFAULTS=true
 DERP_AUTO_ADD_EMBEDDED_REGION=true
+DNS_GLOBAL_NAMESERVERS=1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001
 EOF
 }
 
@@ -209,6 +209,42 @@ verify_install_outputs() {
   [ -f "${HS_ROOT}/.hsctl-instance" ] || fail "missing instance marker"
   [ -f "${STATE_FILE}" ] || fail "missing state file"
   pass "install artifacts created"
+}
+
+verify_ipv6_render_smoke() {
+  local ipv6_root="${TMP_ROOT}/ipv6-render-instance"
+  local ipv6_config="${TMP_ROOT}/ipv6-render.env"
+
+  cat >"${ipv6_config}" <<EOF
+HS_ROOT=${ipv6_root}
+HEADSCALE_IMAGE=ghcr.io/juanfont/headscale
+HEADSCALE_TAG=0.28.0
+HS_CONTAINER=${TEST_CONTAINER}
+SERVER_URL="https://example.com"
+PORT=8080
+LISTEN_ADDR=::
+FIRST_USERNAME=admin
+BASE_DOMAIN=headscale.internal
+DOCKER_MODE=host
+HS_DOCKER_NETWORK=
+DERP_MODE=disabled
+DERP_REGION_ID=999
+DERP_REGION_CODE=headscale
+DERP_REGION_NAME="Headscale Embedded DERP"
+DERP_STUN_LISTEN_ADDR=:3478
+DERP_IPV4=
+DERP_IPV6=
+DERP_INCLUDE_DEFAULTS=true
+DERP_AUTO_ADD_EMBEDDED_REGION=true
+DNS_GLOBAL_NAMESERVERS=1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001
+EOF
+
+  CURRENT_STAGE="ipv6-render-smoke"
+  HEADSCALE_STATE_FILE="${STATE_FILE}" HEADSCALE_LEGACY_MARKER="${LEGACY_MARKER}" \
+    bash "${PROJECT_ROOT}/bin/hsctl" render --auto --config "${ipv6_config}" >/dev/null
+
+  grep -q '^listen_addr: \[::\]:8080$' "${ipv6_root}/config/config.yaml" || fail "ipv6 listen render mismatch"
+  pass "ipv6 render smoke"
 }
 
 verify_runtime() {
@@ -238,7 +274,6 @@ verify_runtime() {
 verify_uninstall() {
   CURRENT_STAGE="uninstall"
   run_hsctl_timed 90 uninstall -y
-  INSTALL_DONE=0
   INSTALL_ATTEMPTED=0
 
   [ ! -d "${HS_ROOT}" ] || fail "HS_ROOT still exists after uninstall"
@@ -263,11 +298,11 @@ main() {
   CURRENT_STAGE="install"
   INSTALL_ATTEMPTED=1
   run_hsctl_timed "${CMD_TIMEOUT_SECONDS}" install --auto --config "${CONFIG_FILE}"
-  INSTALL_DONE=1
   pass "install command"
 
   CURRENT_STAGE="verify-install-artifacts"
   verify_install_outputs
+  verify_ipv6_render_smoke
   CURRENT_STAGE="verify-runtime"
   verify_runtime
   CURRENT_STAGE="verify-uninstall"

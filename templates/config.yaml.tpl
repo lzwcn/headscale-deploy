@@ -1,7 +1,7 @@
 # Generated from template
 # Docs: __OFFICIAL_GIT__
 server_url: __SERVER_URL__
-listen_addr: __LISTEN_ADDR__:8080
+listen_addr: __LISTEN_ADDR_WITH_PORT__
 metrics_listen_addr: 127.0.0.1:9090
 grpc_listen_addr: 127.0.0.1:50443
 grpc_allow_insecure: false
@@ -62,10 +62,7 @@ dns:
   override_local_dns: true
   nameservers:
     global:
-      - 1.1.1.1
-      - 1.0.0.1
-      - 2606:4700:4700::1111
-      - 2606:4700:4700::1001
+__DNS_GLOBAL_NAMESERVERS_BLOCK__
 
 unix_socket: /var/lib/headscale/headscale.sock
 unix_socket_permission: "0770"

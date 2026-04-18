@@ -52,10 +52,11 @@ Install flags:
   --prefix DIR
   --serverurl URL
   --port PORT
-  --listenaddr IPv4
+  --listenaddr IP
   --username NAME
   --basedomain DOMAIN
   --image-tag TAG
+  --docker-mode network|portmap|host
   --docker-network NAME|none
   --container-name NAME
   --derp-mode disabled|private|public

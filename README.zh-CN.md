@@ -41,6 +41,7 @@ headscale-deploy/
 │  └─ legacy.sh
 ├─ templates/
 │  ├─ config.yaml.tpl
+│  ├─ compose.host.yaml.tpl
 │  ├─ compose.network.yaml.tpl
 │  ├─ compose.portmap.yaml.tpl
 │  └─ install.env.example
@@ -84,9 +85,10 @@ cp templates/install.env.example runtime/install.env
 - `HS_ROOT`
 - `SERVER_URL`
 - `DOCKER_MODE`
-- `HS_DOCKER_NETWORK`
+- `HS_DOCKER_NETWORK`（仅 `DOCKER_MODE=network` 时）
 - `HEADSCALE_TAG`
 - `DERP_MODE`
+- `DNS_GLOBAL_NAMESERVERS`（可选）
 
 `runtime/install.env` 使用简单的 `KEY=value` 语法，可选单引号或双引号。配置值只按数据解析，不会按 shell 代码执行。如果值里包含空格，需要加引号。
 
@@ -151,6 +153,8 @@ bash bin/hsctl apikey expire --prefix PREFIX
 bash bin/hsctl upgrade [--image-tag TAG] [--no-backup]
 bash bin/hsctl repair db
 bash bin/hsctl uninstall [-y]
+bash bin/hsctl paths
+bash bin/hsctl legacy [old flat flags]
 ```
 
 ## 安装模式
@@ -171,6 +175,9 @@ bash bin/hsctl install --auto --config runtime/install.env
 
 适合重复部署和自动化。
 
+常用安装参数还包括 `--listenaddr`、`--docker-mode`、`--docker-network`、`--container-name`、`--derp-stun-addr`。
+如果想查看当前受管实例的路径，可以执行 `bash bin/hsctl paths`。
+
 ## Docker 模式
 
 ### `DOCKER_MODE=network`
@@ -184,6 +191,11 @@ bash bin/hsctl install --auto --config runtime/install.env
 - 反向代理需要把 HTTPS 请求转发到 `headscale` 容器
 - 如果启用嵌入式 DERP，Compose 还会额外发布 `3478/udp`
 
+注意：
+
+- 这种模式下 `3478/udp` 仍然经过 Docker 网络层
+- 如果你需要 Embedded DERP 的 IPv6/STUN，`DOCKER_MODE=network` 不是首选
+
 ### `DOCKER_MODE=portmap`
 
 适合直接从宿主机暴露服务。
@@ -192,6 +204,45 @@ bash bin/hsctl install --auto --config runtime/install.env
 
 - 发布 `${PORT}:8080`
 - 如果启用嵌入式 DERP，还会额外发布 `${DERP_STUN_PORT}/udp`
+
+注意：
+
+- `3478/udp` 同样经过 Docker 端口发布
+- 如果客户端需要 Embedded DERP 的 IPv6，优先改用 `DOCKER_MODE=host`
+
+### `DOCKER_MODE=host`
+
+适合需要 Embedded DERP IPv6/STUN 稳定性的场景。
+
+行为：
+
+- Compose 不再使用 `ports`
+- Compose 不再加入外部 Docker 网络
+- 容器直接使用宿主机网络栈
+- Headscale 直接绑定宿主机 `LISTEN_ADDR:8080`
+- Embedded DERP 的 `3478/udp` 不再经过 Docker 端口发布
+
+监听地址语义：
+
+- `LISTEN_ADDR=0.0.0.0` 表示保留 IPv4 监听
+- `LISTEN_ADDR=::` 会渲染成 `[::]:8080`，更适合作为双栈友好的宿主监听写法
+- `DERP_STUN_LISTEN_ADDR=:3478` 仍是推荐默认值
+- `DERP_STUN_LISTEN_ADDR=[::]:3478` 适合你需要显式表达 IPv6 wildcard 监听时使用
+
+适用建议：
+
+- 如果你启用了 Embedded DERP，并且希望 `tailscale netcheck` 能稳定得到 `IPv6: yes`
+- 如果你已经确认 `443/TCP` 正常，但 `3478/udp` 的 IPv6 STUN 仍异常
+
+## Embedded DERP IPv6 说明
+
+请特别注意以下几点：
+
+- `443/TCP` 正常不代表 Embedded DERP 的 STUN 正常
+- `tailscale netcheck` 才是最直接的客户端检查方式
+- 如果要做 Embedded DERP 的 IPv6，优先使用 `DOCKER_MODE=host`
+- `DERP_STUN_LISTEN_ADDR` 推荐使用 `:3478`
+- 建议显式填写 `DERP_IPV4` 和 `DERP_IPV6`
 
 ## DERP 模式
 
@@ -261,12 +312,14 @@ DERP_MODE=public
 如果你的服务器位于中国大陆，比较实用的起始配置是：
 
 ```bash
-DOCKER_MODE=network
+DOCKER_MODE=host
 SERVER_URL="https://<your-headscale-domain>"
 DERP_MODE=private
 DERP_IPV4=你的公网 IPv4
-DERP_STUN_LISTEN_ADDR=0.0.0.0:3478
+DERP_IPV6=你的公网 IPv6
+DERP_STUN_LISTEN_ADDR=:3478
 DERP_INCLUDE_DEFAULTS=true
+DNS_GLOBAL_NAMESERVERS=223.5.5.5,223.6.6.6,119.29.29.29,2400:3200::1,2400:3200:baba::1,1.1.1.1,2606:4700:4700::1111
 ```
 
 同时确认：
@@ -274,7 +327,7 @@ DERP_INCLUDE_DEFAULTS=true
 - 域名解析正确
 - HTTPS 反向代理已经正常工作
 - 防火墙或安全组已经放行 `3478/udp`
-- 反代能够把 HTTPS 请求转发给 Headscale
+- 反代能够把 HTTPS 请求转发给宿主机上的 `127.0.0.1:8080` 或对应监听地址
 
 这样配置的好处：
 
@@ -287,11 +340,39 @@ DERP_INCLUDE_DEFAULTS=true
 ```bash
 bash bin/hsctl install --auto \
   --config runtime/install.env \
+  --docker-mode host \
   --serverurl "https://<your-headscale-domain>" \
-  --docker-network headscale \
   --derp-mode private \
-  --derp-ipv4 203.0.113.10
+  --derp-ipv4 203.0.113.10 \
+  --derp-ipv6 2001:db8::10
 ```
+
+## 部署后建议自检
+
+服务端建议至少执行：
+
+```bash
+bash bin/hsctl status
+docker compose -f runtime/instance/compose.yaml logs --tail=100 headscale
+ss -lunp | grep 3478
+```
+
+客户端建议执行：
+
+```bash
+tailscale netcheck
+```
+
+如果启用了 Embedded DERP 且希望检查 IPv6 STUN，还可以在服务端抓包：
+
+```bash
+tcpdump -ni any udp port 3478
+```
+
+判断思路：
+
+- 如果 `tailscale netcheck` 显示 `IPv6: yes`，说明 DERP/STUN 的 IPv6 路径已经正常
+- 如果显示 `IPv6: no, but OS has support`，优先检查 Docker 网络方式、`DERP_IPV6`、`DERP_STUN_LISTEN_ADDR` 和 `3478/udp`
 
 ## 兼容旧脚本
 
@@ -303,6 +384,7 @@ bash headscale-install.sh --upgrade --image-tag 0.28.0
 ```
 
 现在它内部会转发到 `bin/hsctl` 的兼容层。
+新的部署和自动化场景优先使用 `bash bin/hsctl ...`；`headscale-install.sh` 和 `hsctl legacy` 仅建议保留给旧调用链兼容使用。
 
 ## 说明
 
@@ -316,7 +398,6 @@ bash headscale-install.sh --upgrade --image-tag 0.28.0
 ## 附加文档
 
 - [客户端接入手册](docs/CLIENT_ONBOARDING.zh-CN.md)
-- [GitHub 发布建议](docs/GITHUB_PUBLISHING.zh-CN.md)
 
 ## 后续规划
 

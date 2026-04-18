@@ -120,6 +120,26 @@ tailscale status
 tailscale ip
 ```
 
+检查当前 DERP/STUN 状态：
+
+```bash
+tailscale netcheck
+```
+
+重点看这几项：
+
+- `IPv4: yes/no`
+- `IPv6: yes/no`
+- `Nearest DERP`
+
+如果看到：
+
+```text
+IPv6: no, but OS has support
+```
+
+通常表示客户端系统支持 IPv6，但 Embedded DERP 的 IPv6 STUN 路径没有真正打通。
+
 断开当前登录：
 
 ```bash
@@ -184,6 +204,12 @@ tailscale status
 - 显示 `direct 公网IP:端口`，表示已经直连，打洞成功
 - 显示 `relay "hkg"` 或其他 region，表示当前通过 DERP 中继
 
+如果想进一步确认 NAT/DERP 状态，建议同时执行：
+
+```powershell
+tailscale netcheck
+```
+
 也可以用 ping 判断：
 
 Windows:
@@ -219,6 +245,7 @@ tailscale ping <peer-ip>
 - 域名证书是否正常
 - 反向代理是否能正确转发到 Headscale
 - 如果启用了 DERP，自用场景下 `3478/udp` 是否已放行
+- `443/TCP` 正常不代表 Embedded DERP 的 STUN 正常
 
 ### 2. 提示认证失败
 
@@ -243,6 +270,43 @@ sudo tailscale logout
 - DERP 是否启用
 - 如果你在中国大陆，是否启用了私有 DERP
 - 防火墙是否开放 `3478/udp`
+- 客户端 `tailscale netcheck` 是否显示 `IPv4: yes`
+- 如果你希望 Embedded DERP 支持 IPv6，`tailscale netcheck` 是否显示 `IPv6: yes`
+
+如果你使用的是 Embedded DERP，并且 `tailscale netcheck` 显示：
+
+```text
+IPv6: no, but OS has support
+```
+
+建议优先从服务端检查：
+
+```bash
+bash bin/hsctl status
+docker compose -f runtime/instance/compose.yaml logs --tail=100 headscale
+ss -lunp | grep 3478
+```
+
+如果仍需要继续定位 `3478/udp` 的 IPv6 STUN 路径，可以抓包：
+
+```bash
+tcpdump -ni any udp port 3478
+```
+
+另外请确认：
+
+- `DERP_STUN_LISTEN_ADDR` 是否使用 `:3478`
+- 如果你需要显式表达 IPv6 wildcard 监听，是否改成了 `[::]:3478`
+- 是否显式设置了 `DERP_IPV4` 和 `DERP_IPV6`
+- 如果要稳定支持 Embedded DERP IPv6，服务端是否使用 `DOCKER_MODE=host`
+- `443/TCP` 正常不代表 `3478/udp` 的 IPv6 STUN 路径一定正常
+
+监听地址语义可以这样理解：
+
+- `LISTEN_ADDR=0.0.0.0` 更偏向 IPv4 监听
+- `LISTEN_ADDR=::` 会渲染成 `[::]:8080`，适合作为双栈友好的宿主监听写法
+- `DERP_STUN_LISTEN_ADDR=:3478` 仍是推荐默认值
+- `DERP_STUN_LISTEN_ADDR=[::]:3478` 适合你希望显式表达 IPv6 wildcard STUN 监听时使用
 
 ## 服务端常用配套命令
 
