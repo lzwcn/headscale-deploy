@@ -43,7 +43,7 @@ SERVER_URL="\$(touch ${marker})"
 HEADSCALE_TAG="0.28.0"
 EOF
 
-  (
+  {
     set -euo pipefail
     # shellcheck source=../lib/common.sh
     . "${PROJECT_ROOT}/lib/common.sh"
@@ -53,7 +53,7 @@ EOF
     [ "${SERVER_URL}" = "\$(touch ${marker})" ] || exit 1
     [ "${HEADSCALE_TAG}" = "0.28.0" ] || exit 1
     [ ! -e "${marker}" ] || exit 1
-  )
+  }
 }
 
 test_state_roundtrip_guard() {
@@ -63,7 +63,7 @@ test_state_roundtrip_guard() {
   mkdir -p "${state_root}"
   rm -f "${marker}"
 
-  (
+  {
     set -euo pipefail
     RUNTIME_DIR="${state_root}"
     STATE_FILE_DEFAULT="${RUNTIME_DIR}/state.env"
@@ -87,7 +87,7 @@ test_state_roundtrip_guard() {
     [ "${HS_ROOT}" = "${state_root}/instance dir" ] || exit 1
     [ "${SERVER_URL}" = "\$(touch ${marker})" ] || exit 1
     [ ! -e "${marker}" ] || exit 1
-  )
+  }
 }
 
 test_dangerous_prefix_rejected() {
