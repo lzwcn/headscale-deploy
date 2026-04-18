@@ -43,17 +43,17 @@ SERVER_URL="\$(touch ${marker})"
 HEADSCALE_TAG="0.28.0"
 EOF
 
-  {
-    set -euo pipefail
-    # shellcheck source=../lib/common.sh
-    . "${PROJECT_ROOT}/lib/common.sh"
-    SERVER_URL=""
-    HEADSCALE_TAG=""
-    load_env_file "${env_file}"
-    [ "${SERVER_URL}" = "\$(touch ${marker})" ] || exit 1
-    [ "${HEADSCALE_TAG}" = "0.28.0" ] || exit 1
-    [ ! -e "${marker}" ] || exit 1
-  }
+  PROJECT_ROOT="${PROJECT_ROOT}" env_file="${env_file}" marker="${marker}" bash <<'EOF'
+set -euo pipefail
+# shellcheck source=../lib/common.sh
+. "${PROJECT_ROOT}/lib/common.sh"
+SERVER_URL=""
+HEADSCALE_TAG=""
+load_env_file "${env_file}"
+[ "${SERVER_URL}" = "\$(touch ${marker})" ] || exit 1
+[ "${HEADSCALE_TAG}" = "0.28.0" ] || exit 1
+[ ! -e "${marker}" ] || exit 1
+EOF
 }
 
 test_state_roundtrip_guard() {
@@ -63,31 +63,31 @@ test_state_roundtrip_guard() {
   mkdir -p "${state_root}"
   rm -f "${marker}"
 
-  {
-    set -euo pipefail
-    RUNTIME_DIR="${state_root}"
-    STATE_FILE_DEFAULT="${RUNTIME_DIR}/state.env"
-    LEGACY_MARKER_DEFAULT="${RUNTIME_DIR}/legacy.env"
+  PROJECT_ROOT="${PROJECT_ROOT}" state_root="${state_root}" marker="${marker}" bash <<'EOF'
+set -euo pipefail
+RUNTIME_DIR="${state_root}"
+STATE_FILE_DEFAULT="${RUNTIME_DIR}/state.env"
+LEGACY_MARKER_DEFAULT="${RUNTIME_DIR}/legacy.env"
 
-    # shellcheck source=../lib/common.sh
-    . "${PROJECT_ROOT}/lib/common.sh"
-    # shellcheck source=../lib/state.sh
-    . "${PROJECT_ROOT}/lib/state.sh"
+# shellcheck source=../lib/common.sh
+. "${PROJECT_ROOT}/lib/common.sh"
+# shellcheck source=../lib/state.sh
+. "${PROJECT_ROOT}/lib/state.sh"
 
-    bootstrap_runtime_defaults
-    HS_ROOT="${state_root}/instance dir"
-    printf -v SERVER_URL '%s' "\$(touch ${marker})"
+bootstrap_runtime_defaults
+HS_ROOT="${state_root}/instance dir"
+printf -v SERVER_URL '%s' "\$(touch ${marker})"
 
-    write_state_file
+write_state_file
 
-    SERVER_URL=""
-    HS_ROOT=""
-    load_env_file "${STATE_FILE}"
+SERVER_URL=""
+HS_ROOT=""
+load_env_file "${STATE_FILE}"
 
-    [ "${HS_ROOT}" = "${state_root}/instance dir" ] || exit 1
-    [ "${SERVER_URL}" = "\$(touch ${marker})" ] || exit 1
-    [ ! -e "${marker}" ] || exit 1
-  }
+[ "${HS_ROOT}" = "${state_root}/instance dir" ] || exit 1
+[ "${SERVER_URL}" = "\$(touch ${marker})" ] || exit 1
+[ ! -e "${marker}" ] || exit 1
+EOF
 }
 
 test_dangerous_prefix_rejected() {
@@ -276,7 +276,32 @@ DERP_AUTO_ADD_EMBEDDED_REGION=true
 DNS_GLOBAL_NAMESERVERS=1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001
 EOF
 
-  bash headscale-install.sh --config "${config_file}" --auto --listenaddr :: --prefix "${instance_root}" >/dev/null
+  (
+    set -euo pipefail
+    TEMPLATE_DIR="${PROJECT_ROOT}/templates"
+    RUNTIME_DIR="${TMP_ROOT}/legacy-runtime"
+    STATE_FILE_DEFAULT="${RUNTIME_DIR}/state.env"
+    LEGACY_MARKER_DEFAULT="${RUNTIME_DIR}/legacy-marker.env"
+
+    # shellcheck source=../lib/common.sh
+    . "${PROJECT_ROOT}/lib/common.sh"
+    # shellcheck source=../lib/state.sh
+    . "${PROJECT_ROOT}/lib/state.sh"
+    # shellcheck source=../lib/validate.sh
+    . "${PROJECT_ROOT}/lib/validate.sh"
+    # shellcheck source=../lib/render.sh
+    . "${PROJECT_ROOT}/lib/render.sh"
+    # shellcheck source=../lib/install.sh
+    . "${PROJECT_ROOT}/lib/install.sh"
+    # shellcheck source=../lib/legacy.sh
+    . "${PROJECT_ROOT}/lib/legacy.sh"
+
+    run_install_command() {
+      run_render_command "$@"
+    }
+
+    legacy_main --config "${config_file}" --auto --listenaddr :: --prefix "${instance_root}" >/dev/null
+  )
 
   grep -q '^listen_addr: \[::\]:8080$' "${instance_root}/config/config.yaml"
   grep -q 'network_mode: host' "${instance_root}/compose.yaml"
