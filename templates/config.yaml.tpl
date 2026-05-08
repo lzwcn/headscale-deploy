@@ -53,8 +53,7 @@ log:
   format: text
 
 policy:
-  mode: file
-  path: ""
+  mode: database
 
 dns:
   magic_dns: true
